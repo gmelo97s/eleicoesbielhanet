@@ -1284,7 +1284,7 @@ function confirmar() {
 
 /* ---------- conexão com a planilha ---------- */
 function setShareUrl(url) {
-  if (url && /\/exec$/.test(url) && url !== SHARE_URL) SHARE_URL = url;
+  if (url && /^https?:\/\/[^/]+.*(\/exec)?$/.test(url) && !/\/dev$/.test(url) && url !== SHARE_URL) SHARE_URL = url;
   const msg = 'Apuração AO VIVO do 2º turno do grupo. Vote e acompanhe:' + (SHARE_URL ? ' ' + SHARE_URL : '');
   $('#b-zap').href = 'https://wa.me/?text=' + encodeURIComponent(msg);
 }
@@ -1294,11 +1294,18 @@ function setConn(ok) {
   u.textContent = ok ? `Atualizado às ${hora(Date.now())}` : 'Sem conexão. Tentando de novo…';
 }
 function liveBackend() {
-  const has = () => window.google && google.script && google.script.run;
-  const call = (fn, ...args) => new Promise((resolve, reject) => {
-    if (!has()) { reject(new Error('sem conexão com a planilha')); return; }
-    google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
-  });
+  // Dentro do Google Apps Script usa google.script.run; em qualquer outro lugar (Vercel) usa a API /api/votos.
+  const gas = !!(window.google && google.script && google.script.run);
+  const api = (method, body) => fetch('/api/votos', {
+    method, cache: 'no-store',
+    headers: body ? {'content-type': 'application/json'} : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  }).then(r => r.json().then(j => { if (!r.ok) throw new Error(j.erro || 'erro ' + r.status); return j; }));
+  const call = (fn, ...args) => {
+    if (gas) return new Promise((resolve, reject) => google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args));
+    return fn === 'placar' ? api('GET') : api('POST', {c: args[0], n: args[1] || ''});
+  };
+  if (!gas) setShareUrl(location.origin + location.pathname);
   const apply = s => { if (!s) return; setShareUrl(s.url); Store.set(s.votos, s.encerrada); };
   let timer = null, busy = false, fails = 0;
   const schedule = () => {
